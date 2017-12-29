@@ -8,8 +8,8 @@ import tensorflow as tf
 import PIL.Image
 import PIL.ImageDraw
 import PIL.ImageTk
-import PIL.ImageFont
-import aggdraw
+#import PIL.ImageFont
+#import aggdraw
 import json
 import inspect
 import about
@@ -47,12 +47,12 @@ window.configure(background="gray")
 
 
 img = PIL.Image.new("RGB", (WIDTH, HEIGHT), "black")
-dc2 = aggdraw.Draw(img)
+#dc2 = aggdraw.Draw(img)
 dc = PIL.ImageDraw.Draw(img)
 
 
-pen = aggdraw.Pen("white", 1)
-brush= aggdraw.Brush("red")
+#pen = aggdraw.Pen("white", 1)
+#brush= aggdraw.Brush("red")
 
 def updateImage():
     label.image = PIL.ImageTk.PhotoImage(img) 
@@ -326,18 +326,6 @@ class Random3(Node):
         sess.run(self.op)
 
 
-class AddNode(Node):
-    name="+"
-    height = 50
-    width = 100
-    inputs = [0,0]
-    showvalue = not False
-    def setup(self):
-        Node.setup(self)
-        if(self.inputs[0]!=0 and self.inputs[1]!=0):
-            self.value = self.inputs[0].value + self.inputs[1].value
-            self.outputs[0].value = self.value
-
 class DotNode(Node):
     name="A.B"
     height = 50
@@ -358,35 +346,7 @@ class DotNode(Node):
                 self.value = tf.reduce_sum( A * B, a )
                 self.outputs[0].value = self.value
 
-class ReduceSumNode(Node):
-    name="sum A"
-    height = 50
-    width = 100
-    inputs = [0,0]
-    showvalue = not False
-    def setup(self):
-        Node.setup(self)
-        if self.inputs[0]!=0:
-            A = self.inputs[0].value
-            shape1 = A.get_shape()
-            #contract last indices
-            if len(shape1)>0:
-                a = len(shape1)-1
-                self.value = tf.reduce_sum( A , a )
-                self.outputs[0].value = self.value
-
-class MultiplyNode(Node):
-    name="x"
-    height = 50
-    width = 100
-    inputs = [0,0]
-    showvalue = not False
-    def setup(self):
-        Node.setup(self)
-        if(self.inputs[0]!=0 and self.inputs[1]!=0):
-            self.value = self.inputs[0].value * self.inputs[1].value
-            self.outputs[0].value = self.value
-
+#General node for any tensorflow function
 class FunctionNode(Node):
     name="x"
     height = 50
@@ -419,6 +379,7 @@ class FunctionNode(Node):
         except Exception as e:
             infoLabel.configure(text=str(e))
 
+#Matrix multiplication for each element in a grid
 class MatMultNode(Node):
     name="AB"
     height = 50
@@ -428,8 +389,9 @@ class MatMultNode(Node):
     def setup(self):
         Node.setup(self)
         if(self.inputs[0]!=0 and self.inputs[1]!=0):
-            #self.value =tf.matmul( self.inputs[0].value * self.inputs[1].value )
-            self.value =tf.tensordot( self.inputs[0].value , self.inputs[1].value , [[2],[1]])
+            a = len(self.inputs[0].value.get_shape())-1
+            b = len(self.inputs[1].value.get_shape())-2
+            self.value =tf.tensordot( self.inputs[0].value , self.inputs[1].value , [[a],[b]])
             self.outputs[0].value = self.value
 
 class WatchNode(Node):
@@ -439,7 +401,7 @@ class WatchNode(Node):
         Node.setup(self)
         if(self.inputs[0]!=0):
             self.value = self.inputs[0].value
-            #output[0] = value
+            self.outputs[0] = self.value
 
 ar = np.zeros([256,256])
 for x in range(0,256):
@@ -453,39 +415,16 @@ for x in range(0,W):
     for y in range(0,H):
         ar3[y][x][0] = x*2.0/W-1
         ar3[y][x][1] = y*2.0/H-1
-"""
-img1 = PIL.Image.open("abc.png").convert("RGB") 
-ar2 = np.array(img1) /256.0
 
-c1 = ConstantNode()
-c1.value = tf.constant(ar3)
-c2 = ConstantNode()
-c2.value = tf.constant(ar3)
-
-m = Random3x3()
-
-u = Random3()
-
-t=MatMultNode()
-t.inputs[0] = c1.outputs[0]
-t.inputs[1] = m.outputs[0]
-
-a = DotNode()
-a.inputs[0] = t.outputs[0]
-a.inputs[1] = u.outputs[0]
-
-w=WatchNode()
-w.inputs[0]=a.outputs[0]
-
-nodes = [c1,m,t,u,a,w]
-"""
-X = ConstantNode()
-X.val = ar3
 
 nodes=[]
 
 def defaultNodes():
     global nodes
+
+    X = ConstantNode()
+    X.val = ar3
+
     M = Random3x3()
 
     MX = MatMultNode()
@@ -514,6 +453,35 @@ def defaultNodes():
     W.inputs[0]=XMX_BX.outputs[0]
 
     nodes = [X,M,MX,XMX,B,BX,XMX_BX]
+
+def defaultNodes2():
+    global nodes
+    img1 = PIL.Image.open("abc.png").convert("RGB") 
+    ar2 = np.array(img1) /256.0
+
+    c1 = ConstantNode()
+    c1.value = tf.constant(ar3)
+    c2 = ConstantNode()
+    c2.value = tf.constant(ar3)
+
+    m = Random3x3()
+
+    u = Random3()
+
+    t=MatMultNode()
+    t.inputs[0] = c1.outputs[0]
+    t.inputs[1] = m.outputs[0]
+
+    a = DotNode()
+    a.inputs[0] = t.outputs[0]
+    a.inputs[1] = u.outputs[0]
+
+    w=WatchNode()
+    w.inputs[0]=a.outputs[0]
+
+    nodes = [c1,m,t,u,a,w]
+
+def setupNodes():
     for n in nodes:
         n.issetup = False
     for n in nodes:
@@ -522,8 +490,8 @@ def defaultNodes():
 
     sess.run(tf.global_variables_initializer())
 
-
 defaultNodes()
+setupNodes()
 
 draggingObject = 0
 draggingOutput = -1
@@ -673,12 +641,9 @@ def resetbuttonPressed():
         n.value = 0
         n.outputs[0].value=0
     sess = tf.Session()
-    #should set them up in order!
-    for n in nodes:
-        n.issetup=False
-    for n in nodes:
-        n.setup()
-    #sess.run(tf.global_variables_initializer())
+    setupNodes()
+
+    
 """
 resetbutton = tk.Button(menubar, text="reset", command = resetbuttonPressed )
 resetbutton.pack(side="left") 
