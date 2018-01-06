@@ -83,12 +83,13 @@ def drawBezier( dc, points ):
 class Node:
     x=50
     y=50
-    height = 50
-    width = 100
+    height = 60
+    width = 80
     titleHeight=13
     drag = False
     name = "Image"
     inputs = [0,0]
+    color = (0,0,255)
     inputNames = ["a","b","c","d","e","f","g","h"]
     outputs= []
     value = 0
@@ -117,34 +118,41 @@ class Node:
         z=0
 
     def drawBackground(self,dc):
-        dc.rectangle((self.x-1,self.y,self.x+self.width,self.y+self.titleHeight),outline=(0,128,255),fill=(0,0,128))
+        (r,g,b) = self.color
+        normalColor = self.color
+        darkColor = (r/2,g/2,b/2)
+        lightColor = ((255+r)/2,(255+g)/2,(255+b)/2)
+        dc.rectangle((self.x-1,self.y,self.x+self.width,self.y+self.titleHeight),outline=lightColor,fill=normalColor)
         title=self.name
         if self.value!=0 and self.type!="list":
             title += " "+str(self.value.get_shape())
-        dc.text((self.x+5,self.y+1),title)
+        dc.text((self.x+5,self.y+1),title+"\0")
         dc.rectangle((self.x-1,self.y+self.titleHeight,self.x+self.width,self.y+self.height),
-        outline=(0,128,255),fill=(0,0,255))
+        outline=lightColor, fill=darkColor)
+        y = self.y+len(self.inputs)*self.spacing + self.titleHeight
+        dc.line((self.x-1,y,self.x+self.width,y),fill=lightColor)
 
     circCenter=[]
     circInputCenter=[]
+    spacing = 16
 
     def drawForeground(self,dc):
         circleSize=6
-        spacing = 16
+
         self.circInputCenter=[]
         for n in range(0,len(self.inputs)):
-            y=self.y+self.titleHeight + spacing * n + 5
+            y=self.y+self.titleHeight + self.spacing * n + 5
             x=self.x+5
             self.circInputCenter.append( (x+circleSize/2,y+circleSize/2)  )
             dc.ellipse((x,y ,x+circleSize,y+circleSize),fill=(255,255,0))
             if n<len(self.inputNames):
-                dc.text((x+10,y-3),self.inputNames[n],fill=(255,255,255))
+                dc.text((x+10,y-3),self.inputNames[n]+"\0",fill=(255,255,255))
 
             #dc2.ellipse((x,y ,x+circleSize,y+circleSize),pen,brush)
             if self.inputs[n]!=0:
                 node2 = self.inputs[n].node;
                 X = node2.x + node2.width - 5 - circleSize
-                Y = node2.y + node2.titleHeight + 5 + spacing * self.inputs[n].output
+                Y = node2.y + node2.titleHeight + 5 + self.spacing * self.inputs[n].output
                 #dc.line((x+circleSize/2, y+circleSize/2 , X +circleSize/2,Y + circleSize/2 ) ,fill=(255,255,0) )
                 away=50
                 drawBezier(dc,
@@ -157,7 +165,7 @@ class Node:
 
         self.circCenter=[]
         for n in range(0,len(self.outputs)):
-            y=self.y+self.titleHeight + spacing * n + 5
+            y=self.y+self.titleHeight + self.spacing * n + 5
             x=self.x+self.width-5-circleSize
             self.circCenter.append((x+circleSize/2,y+circleSize/2)  )
             dc.ellipse((x,y ,x+circleSize,y+circleSize),fill=(255,255,0))
@@ -184,10 +192,17 @@ class Node:
         return -1
 
     def showValue(self,dc):
+        yOffset = len(self.inputs)*self.spacing + 5
+        xOffset = 5
+        xPadding = 15
+
         if self.value==0:
             return
         if self.type=="list":
-            dc.text((self.x+20,self.y+10+self.titleHeight),str(self.value))
+            t=str(self.value)
+            dc.text((self.x+xOffset,self.y+yOffset+self.titleHeight),t+"\0")
+            charWidth=6
+            self.width = max(len(t)*charWidth+xOffset+xPadding,self.width)
             return
         shape = self.value.get_shape()
         array = sess.run(self.value)
@@ -200,8 +215,14 @@ class Node:
 
         if len(shape)==2:
             if shape[0]<=4 and shape[1]<=4:
+                maxt=0
                 for y in range(0, shape[0]):
-                    dc.text((self.x+20,self.y+10+self.titleHeight+y*10),str(array[y]))
+                    t = str(array[y])
+                    maxt = max(len(t),maxt)
+                    dc.text((self.x+xOffset,self.y+yOffset+self.titleHeight+y*self.spacing),t+"\0")
+                self.height=int(shape[0])*self.spacing+self.titleHeight+yOffset
+                charWidth=6
+                self.width = max(maxt*charWidth+xOffset+xPadding,self.width)
             else:
                 if array.dtype == np.complex128 or array.dtype==np.complex64:
                     data = np.reshape(array,(shape[0],shape[1],1))
@@ -225,18 +246,22 @@ class Node:
             elif shape[2]==2: #?
                 iscomplex=1 #(doesnt do anything)
         elif len(shape)<=1:
-            dc.text((self.x+20,self.y+10+self.titleHeight),str(array))
+            t=str(array)
+            dc.text((self.x+xOffset,self.y+yOffset+self.titleHeight),t+"\0")
+            charWidth=6
+            self.width = max(len(t)*charWidth+xOffset+xPadding,self.width)
+            self.height = max(self.spacing+yOffset+self.titleHeight,self.height)
 
 dragStartPos = (0,0)
 
 
 class ConstantNode(Node):
     value = 0
-    height = 50
-    width = 100
+    height = 30
     type="constant"
     name="Constant"
     inputs = []
+    color = (0,128,0)
     val = 0
     def __init__(self):
         Node.__init__(self)
@@ -248,11 +273,12 @@ class ConstantNode(Node):
 
 class ListNode(Node):
     value = 0
-    height = 50
+    height = 30
     width = 100
     type="list"
     name="List"
     inputs = []
+    color = (200,0,0)
     val = 0
     def __init__(self):
         Node.__init__(self)
@@ -264,9 +290,10 @@ class ListNode(Node):
 
 class VariableNode(Node):
     value = 0
-    height = 50
+    height = 30
     width = 100
     val = 0
+    color = (128,0,128)
     name="Variable"
     def __init__(self):
         Node.__init__(self)
@@ -277,19 +304,25 @@ class VariableNode(Node):
         sess.run(tf.initialize_variables([self.value]))
         self.outputs[0].value=self.value
 
-class RandomNode(Node):
+class RandomNode(VariableNode):
     value = 0
-    height = 50
+    height = 30
     width = 100
-    name="Random"
+    name="Random Float32"
+    op = 0
     def __init__(self):
         Node.__init__(self)
         self.inputs=[]
-    def calc(self):
-        self.value = tf.constant(random.uniform(-1.0,1.0).astype(np.float32))
-        self.outputs[0].value= self.value
+    def setup(self):
+        Node.setup(self)
+        self.value = tf.Variable(np.random.uniform(0.0,1.0).astype(np.float32)-0.5 )
+        self.outputs[0].value = self.value 
+        self.op = tf.assign(self.value,tf.cast(tf.random_uniform([],-0.5,0.5),tf.float32))
 
-class Random3x3(Node):
+    def calc(self):
+        sess.run(self.op)
+
+class Random3x3(VariableNode):
     value = 0
     height = 50
     width = 100
@@ -307,9 +340,9 @@ class Random3x3(Node):
         sess.run(self.op)
 
 
-class Random3(Node):
+class Random3(VariableNode):
     value = 0
-    height = 50
+    height = 30
     width = 100
     name="Random 3Vector"
     op = 0
@@ -349,8 +382,6 @@ class DotNode(Node):
 #General node for any tensorflow function
 class FunctionNode(Node):
     name="x"
-    height = 50
-    width = 100
     inputs = [0,0]
     showvalue = not False
     args = []
@@ -643,7 +674,7 @@ def resetbuttonPressed():
     sess = tf.Session()
     setupNodes()
 
-    
+
 """
 resetbutton = tk.Button(menubar, text="reset", command = resetbuttonPressed )
 resetbutton.pack(side="left") 
