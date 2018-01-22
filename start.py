@@ -108,8 +108,8 @@ def drawBezier(dc, points):
 
 
 class Node:
-    x = 50
-    y = 50
+    x = 200
+    y = 100
     height = 60
     width = 80
     titleHeight = 13
@@ -444,15 +444,26 @@ class DrawCircle(Node):
     inputNames = ["image ref","position","radius","RGB"]
     color = (255,0,0)
     showvalue = not False
+    def __init__(self):
+        Node.__init__(self)
+        self.inputs = [0,0,0,0]
     def setup(self):
         Node.setup(self)
-        if self.inputs[0]!=0 and self.inputs[1]!=0 and self.inputs[2]!=0 and self.inputs[3]!=0:
+        if self.inputs[0]!=0:# and self.inputs[1]!=0 and self.inputs[2]!=0 and self.inputs[3]!=0:
             image = self.inputs[0].value
-            position = self.inputs[1].value
-            radius = self.inputs[2].value
-            color = self.inputs[3].value
-            imageSize = tf.shape(image)  #width x height x channels
-            circle = (tf.random_uniform(imageSize) + image)/2
+            #position = self.inputs[1].value
+            #radius = self.inputs[2].value
+            #color = self.inputs[3].value
+            #imageSize = tf.shape(image)  #width x height x channels
+            #circle = (tf.random_uniform(imageSize) + image)/2
+            size = self.inputs[0].value.get_shape()
+            w = size[0]
+            h = size[1]
+            print(str(w)+"................"+str(h))
+            uv = np.array([[[u,v] for u in range(0,w) ] for v in range(0,h)])
+            uvConst = tf.constant(uv)
+            d = uv-[50,50]
+            circle = tf.cast(tf.reduce_sum(d*d,2) < 25, tf.float32)
             self.value = tf.assign(image , circle  )
             self.outputs[0].value = self.value
 
@@ -755,12 +766,13 @@ lastPos = (0,0)
 menubar = ttk.Frame(window)
 menubar2 = ttk.Frame(window)
 
-nodeButtons= [tf.add,tf.multiply,tf.assign]  #tf.reduce_sum,
+nodeButtons= ["tf.add","tf.multiply","tf.assign"]  #tf.reduce_sum,
 
 DERIVE="[astype]"
 typeButtons = [DERIVE,  "int32", "int64", "float16", "float32","float64" , "complex64", "complex128" ,"string"]
 
-def buttonPressed(nbName, nb):
+def buttonPressed(nbName):
+    nb=eval(nbName)
     args = inspect.getargspec(nb)
     numArgs = len(args[0]) - len(args.defaults)
     print(str(inspect.getargspec(nb)[0]))
@@ -770,7 +782,7 @@ def buttonPressed(nbName, nb):
     nodes.append(n)
 
 for nb in nodeButtons:
-    button1 = ttk.Button(menubar, text=nb.__name__, command = lambda x=nb:buttonPressed(x) )
+    button1 = ttk.Button(menubar, text=nb, command = lambda x=nb:buttonPressed(x) )
     button1.pack(side="left")
 
 def listbuttonPressed():
@@ -886,7 +898,7 @@ optionVar = tk.StringVar(window)
 optionVar.set(tfFunctions[0]) # default value
 
 def optionChosen(event):
-    buttonPressed("tf."+optionVar.get(), getattr(tf,optionVar.get()))
+    buttonPressed("tf."+optionVar.get() )
 
 funclist = ttk.OptionMenu(menubar, optionVar, *tfFunctions, command=optionChosen)
 funclist.pack(side="left")
@@ -905,7 +917,7 @@ customlist = ttk.OptionMenu(menubar2, customVar, *customNodes, command=customCho
 customlist.pack(side="left")
 
 def optionChosen2(event):
-    buttonPressed("tf.nn."+optionVar2.get(),getattr(tf.nn,optionVar2.get()))
+    buttonPressed("tf.nn."+optionVar2.get())
 
 funclist2 = ttk.OptionMenu(menubar, optionVar2, *tfNNFunctions, command=optionChosen2)
 funclist2.pack(side="left")
@@ -924,6 +936,12 @@ delButton.pack(side="left")
 
 def loadFile(): 
     clearbuttonPressed()
+    filename = tk.filedialog.askopenfilename(
+        initialdir="", 
+        title="Select file",
+        filetypes=[("graphs","*.json")]
+        )
+
     with open('graph_data.json') as data_file:    
         data = json.load(data_file)
     for node in data:
@@ -1008,8 +1026,8 @@ resetbutton.pack(side="left")
 """
 
 def loadData():
-    filename = tk.filedialog.askopenfilename(initialdir = "/",title = "Select file",
-    filetypes = (("image files",("*.jpg","*.png","*.gif","*.txt")),("all files","*.*")))
+    filename = tk.filedialog.askopenfilename(initialdir="/", title="Select file",
+            filetypes=[("image files", ["*.jpg", "*.png", "*.gif", "*.txt"]), ("all files","*.*")])
     _, ext = os.path.splitext(filename)
     data=""
     print("Extension = "+ext)
