@@ -6,5 +6,6 @@ Paul
 
 ![example](screenshot2.png)
 
-A video example:
-![Mandelbrot with tensorflow](http://img.youtube.com/vi/SVxCl9KFUrk/0.jpg)](https://www.youtube.com/watch?v=SVxCl9KFUrk "Mandelbrot with tensorflow")
+A video example on YouTube:
+
+[![Mandelbrot with tensorflow](http://img.youtube.com/vi/SVxCl9KFUrk/hqdefault.jpg)](https://www.youtube.com/watch?v=SVxCl9KFUrk "Mandelbrot with tensorflow")
