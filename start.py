@@ -1,25 +1,16 @@
 """A visual programming tool for use with Tensorflow
-by Paul Bird"""
+by Paul Bird
+You will need to install: wxpython, pil, tensorflow, numpy, opencv
+"""
 
-USE_NATIVE_GUI_STYLE = True
 
 import random
 import os
 import math
 import sys
+import threading
 import numpy as np
-try: #python 3
-    import tkinter as tk
-    if USE_NATIVE_GUI_STYLE:
-        from tkinter import ttk
-        from tkinter.ttk import *
-    else:
-        ttk = tk
-    import tkinter.filedialog
-except:
-    import Tkinter as tk
-    import tkFileDialog
-
+import wx
 import tensorflow as tf
 import PIL.Image
 import PIL.ImageDraw
@@ -31,47 +22,76 @@ import inspect
 import about
 import time
 import json
-#import cv2
+import cv2
+import about
 #import skvideo.io as sk
-
 
 #font = PIL.ImageFont.truetype("Arialbd.ttf",30)
 
 customNodes = []
 
+camera = None
+
 #Create list of tensorflow functions
-tfFunctions = []
+tfFunctions = ["functions","add","multiply","assign","reshape",""]
 for name in dir(tf):
     obj = getattr(tf, name)
     if inspect.isfunction(obj) and not name[0].istitle():
         tfFunctions.append(name)
 
-tfNNFunctions = []
-for name in dir(tf.nn):
-    obj = getattr(tf.nn, name)
+tfNNFunctions = ["tf.layers"]
+for name in dir(tf.layers):
+    obj = getattr(tf.layers, name)
     if inspect.isfunction(obj) and not name[0].istitle():
         tfNNFunctions.append(name)
 
-window = tk.Tk()
-WIDTH = window.winfo_screenwidth()
-HEIGHT = window.winfo_screenheight()
+#tf.nn
+
+updateSpeed = 1
+
+class MainWindow(wx.Frame):
+    def __init__(self):
+        wx.Frame.__init__(self, None, wx.ID_ANY, "Nodes for Tensorflow")
+        #self.SetDoubleBuffered(True)
+        self.SetInitialSize((WIDTH,HEIGHT))
+        self.SetPosition((0,0))
+        self.Bind(wx.EVT_CLOSE, self.OnClose)
+        self.timer = wx.Timer(self, 101)
+        self.Bind(wx.EVT_TIMER, self.OnTimer)
+        self.timer.Start(updateSpeed)    # 1 second interval
+        #self.Maximize(True)
+        
+
+    def OnClose(self, event):
+        print("On Close")
+        self.timer.Stop()
+        if camera!=None:
+            camera.release()
+        self.Destroy()
+
+    def OnTimer(self, event):
+        update()
+
+WIDTH = 1280#int(window.winfo_screenwidth()/1)
+HEIGHT = 720#int(window.winfo_screenheight()/2)
+
+WIDTH = int(1920/1.25)
+HEIGHT = int(1080/1.25)
+
 
 sess = tf.Session()
 
-window.title("Visual Programming with Tensorflow")
-window.geometry(str(WIDTH)+"x"+str(HEIGHT)+"+0+0")
-window.configure(background="gray")
+app = wx.App(False)
+window = MainWindow()
+window.SetTitle("Visual Programming with Tensorflow")
+
 fullscreen = not True
 #window.wm_attributes("-topmost", 1)
 if fullscreen:
     WIDTH = window.winfo_screenwidth()
     HEIGHT = window.winfo_screenheight()
-    window.overrideredirect(True)
-    #window.overrideredirect(False)
-    window.wm_attributes("-fullscreen", 1)
-    window.tk.call("::tk::unsupported::MacWindowStyle", "style", window._w, "plain", "none")
-    window.wm_state("zoomed")
-    window.focus_set()
+    
+    ##PUT FULLSCREEN CODE HERE##
 
 img = PIL.Image.new("RGB", (WIDTH, HEIGHT), "black")
 #dc2 = aggdraw.Draw(img)
@@ -82,8 +102,9 @@ dc = PIL.ImageDraw.Draw(img)
 #brush= aggdraw.Brush("red")
 
 def updateImage():
-    label.image = PIL.ImageTk.PhotoImage(img)
-    label.configure(image=label.image)
+    bitmap = bitmapFromPIL(img)
+    label.SetBitmap(bitmap)
+
 
 class Input:
     node = 0
@@ -108,8 +129,8 @@ def drawBezier(dc, points):
 
 
 class Node:
-    x = 200
-    y = 100
+    x = 50
+    y = 50
     height = 60
     width = 80
     titleHeight = 13
@@ -125,8 +146,13 @@ class Node:
     issetup = True
 
     def __init__(self):
+        global currentNode
         self.inputs = [0, 0]
         self.outputs = [Input(self, 0)]
+        if currentNode:
+            self.x = currentNode.x+currentNode.width + 40
+            self.y = currentNode.y
+        currentNode = self
 
     def setup(self):
         self.issetup = True
@@ -149,7 +175,12 @@ class Node:
         normalColor = self.color
         darkColor = (int(r/2), int(g/2), int(b/2))
         lightColor = (int((255+r)/2), int((255+g)/2), int((255+b)/2))
+        if self==currentNode:
+             dc.rectangle((self.x-2, self.y-1, self.x+self.width+1, self.y+self.height+1), outline=lightColor, fill=normalColor)
+        
         dc.rectangle((self.x-1, self.y, self.x+self.width, self.y+self.titleHeight), outline=lightColor, fill=normalColor)
+
+
         title = self.name
         if self.value != 0 and self.type != "list" and self.type != "optimizer":
             title += " "+str(self.value.get_shape())
@@ -158,6 +189,7 @@ class Node:
                      outline=lightColor, fill=darkColor)
         y = self.y+len(self.inputs)*self.spacing + self.titleHeight
         dc.line((self.x-1, y, self.x+self.width, y), fill=lightColor)
+
 
     circCenter = []
     circInputCenter = []
@@ -200,6 +232,11 @@ class Node:
         (px, py) = pos
         return px > self.x and py > self.y and px < self.x+self.width and py < self.y+self.height
 
+    def insideShowButton(self, pos):
+        (px, py) = pos
+        buttonSize =  self.titleHeight
+        return px > self.x+self.width-buttonSize and py > self.y and px < self.x+self.width and py < self.y+buttonSize
+
     def insideOutput(self, pos):
         global dragStartPos
         (px, py) = pos
@@ -232,8 +269,8 @@ class Node:
             charWidth = 6
             self.width = max(len(t)*charWidth+xOffset+xPadding, self.width)
             return
-        array = sess.run(self.value, feed_dict={i: d() for i, d in zip(placeholders, callbacks)})
-        if self.type=="optimizer":
+        array = sess.run(self.value, feed_dict={i: d for i, d in zip(placeholders, callbackvalues)})
+        if self.type == "optimizer":
             return
         shape = self.value.get_shape()
         if shape._dims is None:
@@ -245,9 +282,9 @@ class Node:
             if(shape[1] > self.width):
                  self.width = int(shape[1])
 
-        if len(shape)==2:
+        if len(shape) == 2:
             if shape[0]<=4 and shape[1]<=4:
-                maxt=0
+                maxt = 0
                 for y in range(0, shape[0]):
                     t = str(array[y])
                     maxt = max(len(t),maxt)
@@ -269,6 +306,15 @@ class Node:
                 else:
                     data = np.reshape(array*255, (shape[0], shape[1])).astype(np.uint8)
                     image = PIL.Image.fromarray(data, mode="L")
+                    #scale image
+                    m = max(image.width, image.height) 
+                    if m < 128:
+                        image = image.resize( [int(128.0/m*image.width), int(128.0/m*image.height)] , PIL.Image.BICUBIC )
+                    if(image.width > self.width):
+                        self.width = image.width
+                    if(image.height > self.height):
+                        self.height = image.height + self.titleHeight
+
                     img.paste(image,(self.x,self.y+self.titleHeight))
         elif len(shape) == 3:
             if shape[2] == 3: #RGB
@@ -342,7 +388,7 @@ class ListNode(Node):
     height = 30
     width = 100
     type="list"
-    name="List"
+    name="Value"
     inputs = []
     color = (200,0,0)
     val = 0
@@ -369,6 +415,7 @@ class VariableNode(Node):
         self.value = tf.Variable(self.val)
         sess.run(tf.initialize_variables([self.value]))
         self.outputs[0].value=self.value
+
 
 class RandomNode(VariableNode):
     value = 0
@@ -462,21 +509,80 @@ class DrawCircle(Node):
             print(str(w)+"................"+str(h))
             uv = np.array([[[u,v] for u in range(0,w) ] for v in range(0,h)])
             uvConst = tf.constant(uv)
-            d = uv-[50,50]
-            circle = tf.cast(tf.reduce_sum(d*d,2) < 25, tf.float32)
+            pos = [50,50]
+            radius=25
+            if self.inputs[1]!=0:
+                pos = self.inputs[1].value
+            if self.inputs[2]!=0:
+                radius = self.inputs[2].value
+            d = uv-pos
+            circle = tf.cast(tf.reduce_sum(d*d,2) < radius, tf.float32)
             self.value = tf.assign(image , circle  )
             self.outputs[0].value = self.value
 
 customNodes.append(DrawCircle.__name__)
 
-placeholders=[]
+class DrawingNode(Node):
+    name="Drawing"
+    height = 100
+    width = 100
+    inputs = [0,0,0,0]
+    inputNames = ["image ref"]
+    color = (255,0,0)
+    showvalue = not False
+    coords = []
+    def __init__(self):
+        Node.__init__(self)
+        self.inputs = [0]
+    def setup(self):
+        Node.setup(self)
+        self.coords = CursorPosition() #cursor position node
+        self.coords.setup()
+        #nodes.append(self.coords)
+        if self.inputs[0]!=0:
+            image = self.inputs[0].value
+            size = self.inputs[0].value.get_shape()
+            #type = self.inputs[0].value.type()
+            w = size[0]
+            h = size[1]
+            print(str(w)+"................"+str(h))
+            uv = np.array([[[u,v] for u in range(0,w) ] for v in range(0,h)])
+            uvConst = tf.constant(uv)
+            radius=10
+            pos = self.coords.outputs[0].value # - placeholder for topleft
+            d = uv-pos
+            circle = image + tf.cast(tf.reduce_sum(d*d,2) < radius, tf.float32)
+            self.value = tf.assign(image , circle  )
+            self.outputs[0].value = self.value
+
+customNodes.append(DrawingNode.__name__)
+
+placeholders = []
 callbacks = []
+callbackvalues = []
 
 currentNode = 0
 
-#Node takes an image and draws a filled circle
-class CursorPosition(Node):
-    name="Cursor Position"
+minstData = None
+
+def loadMinstData():
+    global minstData
+    file = open("minst.bytes")
+    file.seek(16)
+    data = np.fromfile(file, dtype=np.uint8).astype(np.float32)/255.0
+    minstData = np.reshape(data,[-1,28,28])
+    #print(str(minstData[0]))
+
+minstLabels = None
+
+def loadMinstLabels():
+    global minstLabels
+    file = open("mnist_labels.bytes")
+    file.seek(8)
+    minstLabels = np.fromfile(file, dtype=np.byte).astype(np.int32)
+
+class MINSTdata(Node):
+    name="MNIST data"
     height = 100
     width = 100
     inputs = []
@@ -484,8 +590,62 @@ class CursorPosition(Node):
     color = (255,0,0)
     showvalue = not False
     def setup(self):
+        loadMinstData()
         Node.setup(self)
-        self.value = tf.placeholder(tf.float32,shape=[2])
+        self.value = tf.placeholder(tf.float32,shape=[28,28])
+        placeholders.append(self.value)
+        callbacks.append(getRandomMINST)
+        self.outputs[0].value = self.value
+
+customNodes.append(MINSTdata.__name__)
+
+class MINSTnumber(Node):
+    name="MNIST number"
+    height = 100
+    width = 100
+    inputs = []
+    inputNames = []
+    color = (255,0,0)
+    showvalue = not False
+    def setup(self):
+        loadMinstLabels()
+        Node.setup(self)
+        self.value = tf.placeholder(tf.float32,shape=[1,10])
+        placeholders.append(self.value)
+        callbacks.append(getRandomMINSTNumber)
+        self.outputs[0].value = self.value
+
+customNodes.append(MINSTnumber.__name__)
+
+def getRandomMINSTNumber():
+    #print("labels="+str(len(minstLabels)))
+    i = randomNumber % len(minstLabels)
+    num = minstLabels[i]
+    val = np.zeros([1,10])
+    val[0][num] = 1
+    return val
+
+def getRandomMINST():
+    #print("data="+str(len(minstData)))
+    #print("shape="+str(np.shape(minstData)))
+    i = randomNumber % len(minstData)  #random.randint(0, len(minstData)-1)
+    return minstData[i]
+
+#Node takes an image and draws a filled circle
+class CursorPosition(Node):
+    name="Cursor Position"
+    height = 30
+    width = 100
+    inputs = []
+    inputNames = []
+    color = (255,0,0)
+    showvalue = not False
+    def __init__(self):
+        Node.__init__(self)
+        self.inputs=[]
+    def setup(self):
+        Node.setup(self)
+        self.value = tf.placeholder(tf.int32,shape=[2])
         placeholders.append(self.value)
         callbacks.append(getMousePos)
         self.outputs[0].value = self.value
@@ -495,9 +655,6 @@ customNodes.append(CursorPosition.__name__)
 WEBCAM_WIDTH=320
 WEBCAM_HEIGHT=240
 
-def getWebcamImage():
-    #sk.VideoCapture
-    return np.random.rand(WEBCAM_HEIGHT, WEBCAM_WIDTH)
 
 class WebcamNode(Node):
     name="Webcam Node"
@@ -508,8 +665,11 @@ class WebcamNode(Node):
     color = (255,0,0)
     showvalue = not False
     def setup(self):
+        global camera
         Node.setup(self)
-        self.value = tf.placeholder(tf.float32,shape=[WEBCAM_HEIGHT, WEBCAM_WIDTH])
+        if camera==None:
+            camera = cv2.VideoCapture(0)
+        self.value = tf.placeholder(tf.float32,shape=[WEBCAM_HEIGHT, WEBCAM_WIDTH, 3])
         placeholders.append(self.value)
         callbacks.append(getWebcamImage)
         self.outputs[0].value = self.value
@@ -557,8 +717,8 @@ class OptimizerNode(Node):
             self.outputs[0].value = self.value
 
 class RNNNode(Node):
-    inputs = [0,0]
-    outputs = [0,0]
+    inputs = [0, 0]
+    outputs = [0, 0]
     inputNames = ["input","state"]
     name = "RNN"
     def __init__(self):
@@ -577,15 +737,15 @@ class RNNNode(Node):
                 self.outputs[0].value = OUTPUT
                 self.outputs[1].value = NEW_STATE
             except Exception as e:
-                infoLabel.configure(text=str(e))
+                SetText(infoLabel, e)
 
 customNodes.append(RNNNode.__name__)
 
-class FullyConnectedLayer(Node):
+class FullyConnectedSigmoid(Node):
     inputs = [0]
     outputs = [0]
-    inputNames = ["input"]
-    name = "Fully Connected"
+    inputNames = ["input","num nodes"]
+    name = "Fully Connected Sigmoid"
     def __init__(self):
         Node.__init__(self)
     def setup(self):
@@ -594,13 +754,92 @@ class FullyConnectedLayer(Node):
             INPUT = self.inputs[0].value
             OUTPUT_SIZE = self.inputs[1].value
             try:
-                OUTPUT = tf.contrib.layers.fully_connected( INPUT , OUTPUT_SIZE )
+                OUTPUT = tf.contrib.layers.fully_connected( INPUT , OUTPUT_SIZE ,activation_fn=tf.nn.sigmoid)
+                self.value = OUTPUT
                 self.outputs[0].value = OUTPUT
                 sess.run(tf.global_variables_initializer())
             except Exception as e:
-                infoLabel.configure(text=str(e))
+                SetText(infoLabel, e)
 
-customNodes.append(FullyConnectedLayer.__name__)
+customNodes.append(FullyConnectedSigmoid.__name__)
+
+class FullyConnectedSoftmax(Node):
+    inputs = [0]
+    outputs = [0]
+    inputNames = ["input","num nodes"]
+    name = "Fully Connected Softmax"
+    def __init__(self):
+        Node.__init__(self)
+    def setup(self):
+        Node.setup(self)
+        if self.inputs[0]!=0 and self.inputs[1]!=0:
+            INPUT = self.inputs[0].value
+            OUTPUT_SIZE = self.inputs[1].value
+            try:
+                OUTPUT = tf.contrib.layers.fully_connected( INPUT , OUTPUT_SIZE ,activation_fn=tf.nn.softmax)
+                self.value = OUTPUT
+                self.outputs[0].value = OUTPUT
+                sess.run(tf.global_variables_initializer())
+            except Exception as e:
+               SetText(infoLabel, e)
+
+customNodes.append(FullyConnectedSoftmax.__name__)
+
+class ConvolutionalLayer(Node):
+    inputs = [0]
+    outputs = [0]
+    inputNames = ["input"]
+    name = "Convolutional"
+    def __init__(self):
+        Node.__init__(self)
+    def setup(self):
+        Node.setup(self)
+        if self.inputs[0]!=0:
+            INPUT = self.inputs[0].value
+            shape = INPUT.get_shape()
+            try:
+                if len(shape)==3:
+                    INPUT = tf.reshape(INPUT, [1, shape[0], shape[1], shape[2]])
+                if len(shape)==2:
+                    INPUT = tf.reshape(INPUT, [1,shape[0], shape[1], 1])
+                numfilters=3
+                if self.inputs[1]!=0:
+                    numfilters = self.inputs[1].value
+                OUTPUT = tf.layers.conv2d(inputs=INPUT, filters=numfilters, kernel_size=[3, 3], padding="same")
+                #if len(shape)==3:
+                #    OUTPUT = tf.reshape(OUTPUT,(shape[0],shape[1],shape[2]))
+                #if len(shape)==2:
+                #    OUTPUT = tf.reshape(OUTPUT,(shape[0],shape[1]))
+                self.value = OUTPUT
+                self.outputs[0].value = OUTPUT
+                sess.run(tf.global_variables_initializer())
+            except Exception as e:
+                SetText(infoLabel, e)
+
+customNodes.append(ConvolutionalLayer.__name__)
+
+class MaxPoolingLayer(Node):
+    inputs = [0]
+    outputs = [0]
+    inputNames = ["input"]
+    name = "Max Pooling"
+    def __init__(self):
+        Node.__init__(self)
+    def setup(self):
+        Node.setup(self)
+        if self.inputs[0]!=0:
+            INPUT = self.inputs[0].value
+            shape = INPUT.get_shape()
+            try:
+                OUTPUT = tf.layers.max_pooling2d(inputs=INPUT, pool_size=[2, 2], strides=2)
+                self.value = OUTPUT
+                self.outputs[0].value = OUTPUT
+                sess.run(tf.global_variables_initializer())
+            except Exception as e:
+                SetText(infoLabel, e)
+
+customNodes.append(MaxPoolingLayer.__name__)
+
 
 #General node for any tensorflow function
 class FunctionNode(Node):
@@ -634,7 +873,7 @@ class FunctionNode(Node):
             self.value = self.funcCompiled(*fargs)
             self.outputs[0].value = self.value
         except Exception as e:
-            infoLabel.configure(text=str(e))
+            SetText(infoLabel, e)
 
 #Matrix multiplication for each element in a grid
 class MatMultNode(Node):
@@ -753,7 +992,7 @@ def setupNodes():
 
     sess.run(tf.global_variables_initializer())
 
-defaultNodes()
+#defaultNodes()
 setupNodes()
 
 draggingObject = 0
@@ -762,19 +1001,30 @@ lastPos = (0,0)
 
 
 ############# make menu bar ##############
+panel = window# wx.Panel(window, wx.ID_ANY)
+vbox = wx.BoxSizer(wx.VERTICAL)
+panel.SetSizer(vbox)
 
-menubar = ttk.Frame(window)
-menubar2 = ttk.Frame(window)
+menubar = wx.BoxSizer(wx.HORIZONTAL) #wx.Panel(window, wx.ID_ANY)
+menubar2 = wx.BoxSizer(wx.HORIZONTAL) # wx.Panel(window, wx.ID_ANY)
 
-nodeButtons= ["tf.add","tf.multiply","tf.assign"]  #tf.reduce_sum,
+vbox.Add(menubar)
+vbox.Add(menubar2)
+
+nodeButtons= []#"tf.add","tf.multiply","tf.assign","tf.reshape"]  #tf.reduce_sum,
 
 DERIVE="[astype]"
 typeButtons = [DERIVE,  "int32", "int64", "float16", "float32","float64" , "complex64", "complex128" ,"string"]
 
+showDefaultArguments = not True
+
 def buttonPressed(nbName):
     nb=eval(nbName)
     args = inspect.getargspec(nb)
-    numArgs = len(args[0]) - len(args.defaults)
+    if args.defaults != None and not showDefaultArguments:
+        numArgs = len(args[0])- len(args.defaults)
+    else:
+        numArgs = len(args[0])
     print(str(inspect.getargspec(nb)[0]))
     n = FunctionNode(nbName,np.zeros(numArgs-0))
     n.inputNames = inspect.getargspec(nb)[0]
@@ -785,10 +1035,17 @@ for nb in nodeButtons:
     button1 = ttk.Button(menubar, text=nb, command = lambda x=nb:buttonPressed(x) )
     button1.pack(side="left")
 
-def listbuttonPressed():
+def listbuttonPressed(event=None):
     b= ListNode()
-    v = inputVar.get()
-    tv = typeVar.get()
+    setValueOfListNode(b)
+    nodes.append(b)
+
+def getValue(v):
+    return v.GetValue()
+
+def setValueOfListNode(b):
+    v = getValue(inputVar)
+    tv = getValue(typeVar)
     if tv == "string":
         val=v
     else:
@@ -798,32 +1055,31 @@ def listbuttonPressed():
             val = np.array(val).astype(t)
     b.val=val
     b.setup()
-    nodes.append(b)
 
-def cusomNodePressed():
+def cusomNodePressed(event=None):
     b=OptimizerNode()
     b.setup()
     nodes.append(b)
 
 
 
-def optimizebuttonPressed():
+def optimizebuttonPressed(event=None):
     #b=CursorPosition()
     #b=DrawCircle()
     b=OptimizerNode()
     b.setup()
     nodes.append(b)
 
-def pbuttonPressed():
+def pbuttonPressed(event=None):
     b=PlaceholderNode()
-    b.val = eval("lambda:"+inputVar.get())
+    b.val = eval("lambda:"+getValue(inputVar))
     b.setup()
     nodes.append(b)
 
-def cbuttonPressed():
+def cbuttonPressed(event=None):
     b = ConstantNode()
-    v = inputVar.get()
-    tv = typeVar.get()
+    v = getValue(inputVar)
+    tv = getValue(typeVar)
     if tv == "string":
         val=v
     else:
@@ -835,10 +1091,11 @@ def cbuttonPressed():
     b.setup()
     nodes.append(b)
 
-def vbuttonPressed():
+def vbuttonPressed(event=None):
     b = VariableNode()
-    v = inputVar.get()
-    tv = typeVar.get()
+    v = getValue(inputVar)
+    tv =getValue( typeVar)
+    print("v="+str(v))
     if tv == "string":
         val=v
     else:
@@ -850,9 +1107,9 @@ def vbuttonPressed():
     b.setup()
     nodes.append(b)
 
-def abuttonPressed():
-    W=128
-    H=128
+def abuttonPressed(event=None):
+    W=256
+    H=256
     ar3 = np.zeros([H,W]).astype(np.complex64)
     for x in range(0,W):
         for y in range(0,H):
@@ -865,82 +1122,66 @@ def abuttonPressed():
 
 #ttk.Style().configure("TButton",relief="flat", padding=4, background="#000")
 
-cbutton = ttk.Button(menubar, text="constant", command = cbuttonPressed )
-cbutton.pack(side="left")   
+def createButton(holder, text="", command=None):
+    button = wx.Button(panel, id=wx.ID_ANY, label=text)
+    button.Bind(wx.EVT_BUTTON, command)
+    holder.Add(button)
 
-vbutton = ttk.Button(menubar, text="variable", command = vbuttonPressed )
-vbutton.pack(side="left")   
+def createComboBox(holder, choices=None, command=None):
+    combobox = wx.ComboBox(panel, id=wx.ID_ANY, choices=choices, style=wx.CB_READONLY)
+    combobox.SetSelection(0)
+    combobox.Bind(wx.EVT_COMBOBOX, command)
+    holder.Add(combobox)
+    return combobox
 
-pbutton = ttk.Button(menubar, text="placeholder", command = pbuttonPressed )
-pbutton.pack(side="left")   
+createButton(menubar, text="value", command = listbuttonPressed )
+createButton(menubar, text="variable", command = vbuttonPressed )
+createButton(menubar, text="constant tensor", command = cbuttonPressed )
+createButton(menubar, text="placeholder", command = pbuttonPressed )  
+createButton(menubar, text="optimize", command = optimizebuttonPressed )
+createButton(menubar, text="argand", command = abuttonPressed )  
 
-listbutton = ttk.Button(menubar, text="list", command = listbuttonPressed )
-listbutton.pack(side="left") 
-
-optimizebutton = ttk.Button(menubar, text="optimize", command = optimizebuttonPressed )
-optimizebutton.pack(side="left") 
-
-argandbutton = ttk.Button(menubar, text="argand", command = abuttonPressed )
-argandbutton.pack(side="left")  
-
-inputVar = tk.StringVar()
-inputVar.set("[[1.0, 2.0], [3.0, 4.0]]")
-input = ttk.Entry(menubar, textvariable=inputVar)
-input.pack(side="left")
-
-typeVar = tk.StringVar(window)
-typeVar.set(typeButtons[0]) # default value
-
-typelist = ttk.OptionMenu(menubar, typeVar, *typeButtons )
-typelist.pack(side="left")
-
-optionVar = tk.StringVar(window)
-optionVar.set(tfFunctions[0]) # default value
+inputVar = wx.TextCtrl(panel, value = "[[1.0, 2.0], [3.0, 4.0]]")
+menubar.Add(inputVar)
+typeVar = createComboBox(menubar, typeButtons, None)
 
 def optionChosen(event):
-    buttonPressed("tf."+optionVar.get() )
+    buttonPressed("tf."+getValue(optionVar) )
 
-funclist = ttk.OptionMenu(menubar, optionVar, *tfFunctions, command=optionChosen)
-funclist.pack(side="left")
-
-optionVar2 = tk.StringVar(window)
-optionVar2.set("conv2d") # default value
+optionVar = createComboBox(menubar, tfFunctions, optionChosen)
 
 def customChosen(event):
-    c = eval(customVar.get()+"()")
+    c = eval(getValue(customVar)+"()")
     nodes.append(c)
-    resetbuttonPressed()
+    resetbuttonPressed(event=None)
 
-
-customVar = tk.StringVar(window)
-customlist = ttk.OptionMenu(menubar2, customVar, *customNodes, command=customChosen)
-customlist.pack(side="left")
+customVar = createComboBox(menubar2, customNodes, customChosen)
 
 def optionChosen2(event):
-    buttonPressed("tf.nn."+optionVar2.get())
+    buttonPressed("tf.layers."+getValue(optionVar2))
 
-funclist2 = ttk.OptionMenu(menubar, optionVar2, *tfNNFunctions, command=optionChosen2)
-funclist2.pack(side="left")
+optionVar2 = createComboBox(menubar, tfNNFunctions, optionChosen2)
 
-def deleteNode():
+def deleteNode(event=None):
     global currentNode
     print(str(currentNode))
     if currentNode != 0:
         nodes.remove(currentNode)
     currentNode = 0
-    resetbuttonPressed()
+    resetbuttonPressed(event=None)
 
 
-delButton = ttk.Button(menubar2 ,text="delete",command=deleteNode)
-delButton.pack(side="left")
+createButton(menubar2 ,text="delete",command=deleteNode)
 
-def loadFile(): 
-    clearbuttonPressed()
-    filename = tk.filedialog.askopenfilename(
-        initialdir="", 
-        title="Select file",
-        filetypes=[("graphs","*.json")]
-        )
+def loadFile(event=None): 
+    clearbuttonPressed(event=None)
+
+    with wx.FileDialog(window, "Select file", wildcard="graphs|*.json",
+                    style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
+        if fileDialog.ShowModal() == wx.ID_CANCEL:
+            return     # the user changed their mind
+        filename = fileDialog.GetPath()
+
 
     with open('graph_data.json') as data_file:    
         data = json.load(data_file)
@@ -954,6 +1195,8 @@ def loadFile():
             n = eval(type+"()")
         n.x = node["x"]
         n.y = node["y"]
+        if hasattr(n, "val"):
+            n.val = node["val"]
         nodes.append(n)
     index = 0
     for node in data:
@@ -963,10 +1206,10 @@ def loadFile():
                 nodes[index].inputs[i] = nodes[inputs[i]].outputs[0]
         index = index+1
 
-    resetbuttonPressed()
+    resetbuttonPressed(event=None)
 
 
-def saveFile():
+def saveFile(event=None):
     data=[]
     for node in nodes:
         nodeData={}
@@ -974,6 +1217,8 @@ def saveFile():
         nodeData["type"] = node.__class__.__name__
         nodeData["x"] = node.x
         nodeData["y"] = node.y   
+        if hasattr(node,"val"):
+            nodeData["val"] = node.val
         func = getattr(node, "func", 0)
         if func!=0:
             nodeData["func"] = func
@@ -988,26 +1233,31 @@ def saveFile():
     with open('graph_data.json', 'w') as outfile:  
         json.dump(data, outfile , indent=4)
 
+fullScreen=False
+
+def ToggleFullScreen(event=None):
+    global fullScreen
+    fullScreen = not fullScreen
+    window.ShowFullScreen(fullScreen)
+
+
+createButton(menubar2 ,text="Load Network",command=loadFile)
+createButton(menubar2 ,text="Save Network",command=saveFile)
 
 
 
-loadfileButton = ttk.Button(menubar2 ,text="Load Network",command=loadFile)
-loadfileButton.pack(side="left")
-
-savefileButton = ttk.Button(menubar2 ,text="Save Network",command=saveFile)
-savefileButton.pack(side="left")
 
 
-def clearbuttonPressed():
-    global nodes
+def clearbuttonPressed(event=None):
+    global nodes, currentNode
     nodes = []
-    resetbuttonPressed()
+    resetbuttonPressed(event=None)
+    currentNode = None
 
-clrbutton = ttk.Button(menubar, text="clear", command = clearbuttonPressed )
-clrbutton.pack(side="left") 
+createButton(menubar, text="clear", command = clearbuttonPressed )
 
 
-def resetbuttonPressed():
+def resetbuttonPressed(event=None):
     global nodes, sess, callbacks, placeholders
     sess.close()
     tf.reset_default_graph()
@@ -1025,9 +1275,30 @@ resetbutton = ttk.Button(menubar, text="reset", command = resetbuttonPressed )
 resetbutton.pack(side="left") 
 """
 
-def loadData():
-    filename = tk.filedialog.askopenfilename(initialdir="/", title="Select file",
-            filetypes=[("image files", ["*.jpg", "*.png", "*.gif", "*.txt"]), ("all files","*.*")])
+
+
+def getWebcamImage():
+    _, image = camera.read()
+    image = cv2.resize(image, (WEBCAM_WIDTH, WEBCAM_HEIGHT), 0, 0, cv2.INTER_CUBIC)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)/255.0
+    return image
+
+def newWebcamNode(event=None):
+    global camera
+    camera = cv2.VideoCapture(0)
+    c1 = PlaceholderNode()
+    c1.val = lambda: getWebcamImage()
+    c1.setup()
+    nodes.append(c1)
+    resetbuttonPressed(event=None)
+
+def loadData(event=None):
+    with wx.FileDialog(window, "Select file", wildcard="image files|*.jpg;*.png;*.gif;*.txt|movies files|*.mp4;*.mpg;*.flv|all files|*.*",
+                    style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST) as fileDialog:
+        if fileDialog.ShowModal() == wx.ID_CANCEL:
+            return     # the user changed their mind
+        filename = fileDialog.GetPath()
+
     _, ext = os.path.splitext(filename)
     data=""
     print("Extension = "+ext)
@@ -1040,6 +1311,14 @@ def loadData():
                     data+=l
                 else:
                     data+=" \n"
+    elif ext==".mp4" or ext==".flv" or ext==".mpg":
+        cap = cv2.VideoCapture(filename)
+        c1 = PlaceholderNode()
+        c1.val = lambda: getVideoFrame(cap)
+        c1.setup()
+        nodes.append(c1)
+        resetbuttonPressed(event=None)
+        return
     else:
         img1 = PIL.Image.open(filename).convert("RGB") 
         ar2 = np.array(img1) /256.0
@@ -1047,50 +1326,112 @@ def loadData():
     c1 = ConstantNode()
     c1.val = data
     nodes.append(c1)
-    resetbuttonPressed()
+    resetbuttonPressed(event=None)
 
-filebutton = ttk.Button(menubar2, text="load data",command = loadData)
-filebutton.pack(side="left")
+createButton(menubar2, text="load data",command = loadData)
+createButton(menubar2, text="webcam",command = newWebcamNode)
+
+def getVideoFrame(cap):
+    ret, image = cap.read()
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)/255.0
+    if not ret:
+        cap.set(cv2.CAP_PROP_POS_AVI_RATIO , 0)
+        ret, image = cap.read()
+    image = cv2.resize(image, (320, 180), 0, 0, cv2.INTER_CUBIC)
+    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)/255.0
+    return image
 
 
-def infoPressed():
+def infoPressed(event=None):
     graph_def = tf.get_default_graph().as_graph_def()
-    infoLabel.configure(text="nodes="+str(len(graph_def.node)))
+    SetText(infoLabel, "nodes="+str(len(graph_def.node)))
     for node in graph_def.node:
         print(node.name+" : "+node.op)
 
-infobutton = ttk.Button(menubar, text="graph info", command = infoPressed )
-infobutton.pack(side="left") 
+createButton(menubar, text="graph info", command = infoPressed )
 
-def aboutbuttonPressed():
-    about.AboutDialog(window)
+def aboutbuttonPressed(event=None):
+    aboutDialog = about.AboutDialog(window)
+    aboutDialog.Show()
 
-aboutbutton = ttk.Button(menubar, text="about", command = aboutbuttonPressed )
-aboutbutton.pack(side="left") 
+createButton(menubar, text="about", command = aboutbuttonPressed )
 
-menubar.pack(fill="x")
-menubar2.pack(fill="x")
+def toggleSpeed(event=None):
+    global updateSpeed
+    if updateSpeed == 1:
+        updateSpeed = 1000
+    else:
+        updateSpeed = 1
+    window.timer.Start(updateSpeed)
+    
 
-statusbar = ttk.Frame(window)
-infoLabel =ttk.Label(statusbar,text="info")
-infoLabel.pack(side="left")
+def changeValue(event=None):
+    b=currentNode
+    setValueOfListNode(b)
 
-statusbar.pack(fill="x")
+updateChange = True
 
-label = ttk.Label(window, borderwidth=0)
-label.pack(fill="x")
+def updateOnChange():
+    print(str(getValue(upc)))
+    if getValue(upc) == 1:
+        updateChange = True
+    else:
+        updateChange = False
+
+createButton(menubar2, text="slow", command = toggleSpeed)
+createButton(menubar2, text="change value", command = changeValue)
+createButton(menubar2 ,text="Full screen",command=ToggleFullScreen)
+
+def bitmapFromPIL( pilImg):
+    #print(pilImg.mode)
+    data = pilImg.convert('RGB').tobytes()
+    wxImg = wx.Image(*pilImg.size, data)
+    wxBmap = wxImg.ConvertToBitmap()     # Equivalent result:   wxBmap = wx.BitmapFromImage( wxImg )
+    return wxBmap
+
+
+
+class DynamicBitmap(wx.Panel):
+    def __init__(self, parent=None, id=-1, bitmap=None):
+        wx.Panel.__init__(self, parent, id=-1)
+        self.SetInitialSize((bitmap.Width, bitmap.Height))
+        self.SetBackgroundStyle(wx.BG_STYLE_PAINT)
+        self.parent = parent
+        self.Bind(wx.EVT_PAINT, self.OnPaint)
+        self.bitmap = bitmap
+    
+    def SetBitmap(self, b):
+        self.bitmap = b
+        #self.Refresh()
+
+    def OnPaint(self, evt):
+        dc = wx.BufferedPaintDC(self)
+        dc.DrawBitmap(self.bitmap, 0,0)
+
+infoLabel = wx.StaticText(panel, label="info")
+vbox.Add(infoLabel)
+bitmap = wx.Image(WIDTH, HEIGHT).ConvertToBitmap()
+label = DynamicBitmap(panel, -1, bitmap)
+vbox.Add(label)
+
+#    updateOnChangeCheckbox = ttk.Checkbutton(menubar2, text="update graph on change", command = updateOnChange, variable = upc)
+#    updateOnChangeCheckbox.pack(side="left")
+
+
 
 
 
 
 def getMousePos():
-    return (
-        window.winfo_pointerx() - label.winfo_rootx(),
-        window.winfo_pointery() - label.winfo_rooty()
+    pt = wx.GetMousePosition()
+    return ( 
+        pt.x - label.GetScreenPosition().x, 
+        pt.y - label.GetScreenPosition().y 
     )
 
+
 def leftMouseUp(event):
-    global draggingObject, draggingOutput
+    global draggingObject, draggingOutput, currentNode
     pos = getMousePos()
     if draggingOutput !=-1:
         for b in nodes:
@@ -1098,13 +1439,17 @@ def leftMouseUp(event):
             if o!=-1:
                 #print ("inputs " +str(o)+ " of "+str(b)+"to output "+str(draggingOutput)+" of "+str(draggingObject))
                 b.inputs[o] = draggingObject.outputs[draggingOutput]
-                resetbuttonPressed()
+                currentNode = b
+                if updateChange:
+                    resetbuttonPressed(event=None)
                 #b.setup()
 
     draggingObject = 0
     draggingOutput = -1
     pos = getMousePos()
 
+def SetText(label, t):
+    label.SetLabel(str(t))
 
 def leftMouseDown(event):
     global draggingObject, draggingOutput, currentNode
@@ -1112,23 +1457,25 @@ def leftMouseDown(event):
     draggingOutput = -1
     pos = getMousePos()
     for b in nodes:
+        if b.insideShowButton(pos):
+            print(str(b.showvalue))
+            b.height = max(len(b.inputs),len(b.outputs)) * b.spacing + b.titleHeight
+            b.showvalue = not b.showvalue
         if b.inside(pos):
             #dc.rectangle((0,0,650,650),fill=(0,255,0))
             draggingObject = b
             currentNode = draggingObject
             #if draggingObject.type=="constant":
-            infoLabel.configure(text=str(draggingObject.value))
+            SetText(infoLabel, draggingObject.value)
             #    inputVar.set(draggingObject.val)
         o = b.insideOutput(pos)
         if o!=-1:
             draggingOutput = o
         
-
     updateImage()
-    window.update()
 
 def doStuff():
-    global lastPos
+    global lastPos, callbackvalues
     dc.rectangle((0,0,WIDTH,HEIGHT),fill=(0,0,0))
     (x0,y0) = lastPos
     (x,y) = getMousePos()
@@ -1147,6 +1494,10 @@ def doStuff():
         x,y)  
         )
 
+    callbackvalues=[0]*len(callbacks)
+    for n in range(0,len(callbacks)):
+        callbackvalues[n] = callbacks[n]()
+
     for b in nodes:
         b.calc()
         b.draw(dc)
@@ -1154,14 +1505,21 @@ def doStuff():
     lastPos = (x,y)
 
 
-label.bind("<Button-1>",leftMouseDown)
-label.bind("<ButtonRelease-1>",leftMouseUp)
+label.Bind(wx.EVT_LEFT_DOWN,leftMouseDown)
+label.Bind(wx.EVT_LEFT_UP,leftMouseUp)
+
+
+randomNumber = 0
+
+
 
 def update():
+    global randomNumber
+    randomNumber =randomNumber+1# random.randint(0,99999999)
     doStuff()
     updateImage()
-    window.update()
-    window.after(1,update)
+    label.Refresh()
+
 
 def outputGraph():
     graph_def = tf.get_default_graph().as_graph_def()
@@ -1173,6 +1531,8 @@ def outputGraph():
 update()
 
 
+        
 
-window.focus_set()
-window.mainloop()
+
+window.Show()
+app.MainLoop()

@@ -1,0 +1,82 @@
+[
+    {
+        "type": "MINSTdata",
+        "x": 50,
+        "y": 50,
+        "inputs": [
+            -1,
+            -1
+        ]
+    },
+    {
+        "type": "MINSTnumber",
+        "x": 981,
+        "y": 335,
+        "inputs": [
+            -1,
+            -1
+        ]
+    },
+    {
+        "type": "ConstantNode",
+        "x": 189,
+        "y": 116,
+        "val": [
+            1,
+            784
+        ],
+        "inputs": []
+    },
+    {
+        "type": "FunctionNode",
+        "x": 315,
+        "y": 53,
+        "func": "tf.reshape",
+        "inputs": [
+            0,
+            2,
+            -1
+        ]
+    },
+    {
+        "type": "FullyConnectedSigmoid",
+        "x": 816,
+        "y": 195,
+        "inputs": [
+            3,
+            5
+        ]
+    },
+    {
+        "type": "ListNode",
+        "x": 665,
+        "y": 160,
+        "val": 100,
+        "inputs": []
+    },
+    {
+        "type": "FullyConnectedSoftmax",
+        "x": 974,
+        "y": 254,
+        "inputs": [
+            4,
+            7
+        ]
+    },
+    {
+        "type": "ListNode",
+        "x": 818,
+        "y": 272,
+        "val": 10,
+        "inputs": []
+    },
+    {
+        "type": "OptimizerNode",
+        "x": 1189,
+        "y": 280,
+        "inputs": [
+            6,
+            1
+        ]
+    }
+]
