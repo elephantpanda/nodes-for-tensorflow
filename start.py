@@ -33,17 +33,23 @@ customNodes = []
 camera = None
 
 #Create list of tensorflow functions
-tfFunctions = ["functions","add","multiply","assign","reshape",""]
+tfFunctions = ["functions","add","subtract","multiply","divide","assign","reshape",""]
 for name in dir(tf):
     obj = getattr(tf, name)
     if inspect.isfunction(obj) and not name[0].istitle():
         tfFunctions.append(name)
 
-tfNNFunctions = ["tf.layers"]
+tfNNFunctions = ["tf.nn"]
+for name in dir(tf.nn):
+    obj = getattr(tf.nn, name)
+    if inspect.isfunction(obj) and not name[0].istitle():
+        tfNNFunctions.append(name)
+
+tfLayerFunctions = ["tf.layers"]
 for name in dir(tf.layers):
     obj = getattr(tf.layers, name)
     if inspect.isfunction(obj) and not name[0].istitle():
-        tfNNFunctions.append(name)
+        tfLayerFunctions.append(name)
 
 #tf.nn
 
@@ -182,7 +188,7 @@ class Node:
 
 
         title = self.name
-        if self.value != 0 and self.type != "list" and self.type != "optimizer":
+        if self.value != 0 and self.type != "value" and self.type != "optimizer":
             title += " "+str(self.value.get_shape())
         dc.text((self.x+5, self.y+1), title+"\0")
         dc.rectangle((self.x-1, self.y+self.titleHeight, self.x+self.width, self.y+self.height),
@@ -263,13 +269,17 @@ class Node:
 
         if self.value == 0:
             return
-        if self.type == "list":
+        if self.type == "value":
             t = str(self.value)
             dc.text((self.x+xOffset, self.y+yOffset+self.titleHeight), t+"\0")
             charWidth = 6
             self.width = max(len(t)*charWidth+xOffset+xPadding, self.width)
             return
-        array = sess.run(self.value, feed_dict={i: d for i, d in zip(placeholders, callbackvalues)})
+        try:    
+            array = sess.run(self.value, feed_dict={i: d for i, d in zip(placeholders, callbackvalues)})
+        except Exception as e:
+            SetText(infoLabel, "Error")
+            return
         if self.type == "optimizer":
             return
         shape = self.value.get_shape()
@@ -387,7 +397,7 @@ class ListNode(Node):
     value = 0
     height = 30
     width = 100
-    type="list"
+    type="value"
     name="Value"
     inputs = []
     color = (200,0,0)
@@ -1052,7 +1062,7 @@ def setValueOfListNode(b):
         val = eval(v)
         if tv!=DERIVE:
             t = getattr(np,tv)
-            val = np.array(val).astype(t)
+            val = np.array(val).astype(t).tolist()
     b.val=val
     b.setup()
 
@@ -1128,7 +1138,7 @@ def createButton(holder, text="", command=None):
     holder.Add(button)
 
 def createComboBox(holder, choices=None, command=None):
-    combobox = wx.ComboBox(panel, id=wx.ID_ANY, choices=choices, style=wx.CB_READONLY)
+    combobox = wx.ComboBox(panel, id=wx.ID_ANY, choices=choices, style=wx.CB_READONLY , size = (150,-1))
     combobox.SetSelection(0)
     combobox.Bind(wx.EVT_COMBOBOX, command)
     holder.Add(combobox)
@@ -1158,9 +1168,14 @@ def customChosen(event):
 customVar = createComboBox(menubar2, customNodes, customChosen)
 
 def optionChosen2(event):
+    buttonPressed("tf.nn."+getValue(optionVar2))
+
+def optionChosen3(event):
     buttonPressed("tf.layers."+getValue(optionVar2))
 
 optionVar2 = createComboBox(menubar, tfNNFunctions, optionChosen2)
+
+optionVar3 = createComboBox(menubar2, tfLayerFunctions, optionChosen3)
 
 def deleteNode(event=None):
     global currentNode
